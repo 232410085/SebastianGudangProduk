@@ -108,6 +108,21 @@
     <button class="btn btn-success" onclick="simpanTransaksi()">Simpan Transaksi</button>
     <span class="nama-user">Sebastian Maximus Chandra</span>
   </div>
+
+  <!-- Riwayat Transaksi -->
+  <div class="card p-3 mt-4">
+    <h5>📜 Riwayat Transaksi</h5>
+    <table class="table table-bordered bg-white">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Tanggal</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody id="riwayat"></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -129,11 +144,13 @@
     }
     produkList = data;
     let select = document.getElementById("produk");
+    select.innerHTML = '<option value="">Pilih Produk</option>'; // reset
     data.forEach(p => {
       let opt = document.createElement("option");
       opt.value = p.id;
       opt.setAttribute("data-harga", p.harga);
-      opt.textContent = p.nama;
+      opt.setAttribute("data-stok", p.stok);
+      opt.textContent = `${p.nama} (Stok: ${p.stok})`;
       select.appendChild(opt);
     });
   }
@@ -150,9 +167,15 @@
     let nama = produk.options[produk.selectedIndex].text;
     let harga = parseFloat(document.getElementById("harga").value);
     let jumlah = parseInt(document.getElementById("jumlah").value);
+    let stok = parseInt(produk.options[produk.selectedIndex].getAttribute("data-stok"));
 
     if (!id_produk || !harga || !jumlah) {
       Swal.fire("Oops!", "Pilih produk dan isi jumlah", "warning");
+      return;
+    }
+
+    if (jumlah > stok) {
+      Swal.fire("Oops!", "Jumlah melebihi stok yang tersedia!", "warning");
       return;
     }
 
@@ -193,6 +216,7 @@
       return;
     }
 
+    // Simpan header penjualan
     const { data: penjualan, error: err1 } = await db.from("penjualan").insert([{ 
       tanggal: new Date().toISOString(), 
       total 
@@ -205,6 +229,7 @@
 
     let id_penjualan = penjualan.id;
 
+    // Simpan detail penjualan
     let detailInsert = keranjang.map(d => ({
       id_penjualan,
       id_produk: d.id_produk,
@@ -219,14 +244,67 @@
       return;
     }
 
+    // Update stok produk
+    for (let d of keranjang) {
+      const { data: produk, error: errFetch } = await db
+        .from("produk")
+        .select("stok")
+        .eq("id", d.id_produk)
+        .single();
+
+      if (errFetch) {
+        Swal.fire("Error", "Gagal ambil stok produk: " + errFetch.message, "error");
+        return;
+      }
+
+      let stokBaru = produk.stok - d.jumlah;
+      if (stokBaru < 0) stokBaru = 0;
+
+      const { error: errUpdate } = await db
+        .from("produk")
+        .update({ stok: stokBaru })
+        .eq("id", d.id_produk);
+
+      if (errUpdate) {
+        Swal.fire("Error", "Gagal update stok: " + errUpdate.message, "error");
+        return;
+      }
+    }
+
     Swal.fire("Sukses", "Transaksi berhasil disimpan", "success");
     keranjang = [];
     total = 0;
     renderKeranjang();
+    loadProduk();   // refresh stok di dropdown
+    loadRiwayat();  // refresh riwayat
+  }
+
+  async function loadRiwayat() {
+    const { data, error } = await db.from("penjualan").select("*").order("tanggal", { ascending: false });
+    if (error) {
+      Swal.fire("Error", "Gagal memuat riwayat: " + error.message, "error");
+      return;
+    }
+
+    let tbody = document.getElementById("riwayat");
+    tbody.innerHTML = "";
+
+    data.forEach(trx => {
+      let tr = document.createElement("tr");
+      let tanggal = new Date(trx.tanggal).toLocaleString("id-ID");
+      tr.innerHTML = `
+        <td>${trx.id}</td>
+        <td>${tanggal}</td>
+        <td>Rp ${trx.total.toLocaleString()}</td>
+      `;
+      tbody.appendChild(tr);
+    });
   }
 
   loadProduk();
+  loadRiwayat();
 </script>
 
 </body>
 </html>
+
